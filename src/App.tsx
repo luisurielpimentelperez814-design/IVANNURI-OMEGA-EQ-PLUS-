@@ -1,0 +1,1140 @@
+import React, { useState, useEffect, useRef } from "react";
+import { motion, AnimatePresence } from "motion/react";
+import { AudioEngine } from "./lib/audioEngine";
+import {
+  Play, Pause, Layout, Waves, Search, Disc, Volume2, ShieldAlert, FolderOpen, SkipBack, SkipForward, Settings,
+  ChevronDown, ChevronRight, Activity
+} from "lucide-react";
+import { t } from "./i18n";
+import { PsychometricChart } from "./components/PsychometricChart";
+import { NeuralArchitecture } from "./components/NeuralArchitecture";
+import { SRSGauge } from "./components/SRSGauge";
+import { GridDisplay } from "./components/GridDisplay";
+import { ObjectExplorer } from "./components/ObjectExplorer";
+import { TidalService, TidalTrack } from "./services/tidalService";
+
+const PRESETS: Record<string, any> = {
+  "PURE BYPASS": { bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], drive: 1.0, warmth: 1.0 },
+  "ROCK ELITE": { bands: [4, 5, 3, 1, -2, -1, 2, 4, 3, 2], drive: 1.8, warmth: 1.3 },
+  "MODERN PUNCH": { bands: [5, 3, 1, -1, -2, 0, 1, 3, 4, 4], drive: 1.5, warmth: 1.1 },
+  "VINTAGE TUBE": { bands: [2, 4, 4, 2, 0, -1, -1, 1, 3, 4], drive: 2.2, warmth: 2.0 },
+  "IVANNURI OMEGA": { bands: [3, 4, 3, 2, 0, -1, 0, 2, 4, 4], drive: 1.7, warmth: 1.8 },
+};
+
+const Tooltip = ({ text, children, position = "top" }: { text: string, children: React.ReactNode, position?: "top" | "bottom" | "left" | "right" }) => {
+  if (!text) return <>{children}</>;
+  const posClasses = {
+    top: "bottom-full left-1/2 -translate-x-1/2 mb-2",
+    bottom: "top-full left-1/2 -translate-x-1/2 mt-2",
+    left: "right-full top-1/2 -translate-y-1/2 mr-2",
+    right: "left-full top-1/2 -translate-y-1/2 ml-2",
+  };
+  return (
+    <div className="relative group/tt flex items-center justify-center">
+      {children}
+      <div className={`absolute ${posClasses[position]} z-[200] px-3 py-1.5 bg-[#1a1a1a] border border-white/20 text-[10px] text-white whitespace-nowrap opacity-0 group-hover/tt:opacity-100 pointer-events-none transition-all duration-200 transform scale-95 group-hover/tt:scale-100 shadow-xl font-mono uppercase tracking-wider`}>
+        {text}
+        <div className={`absolute w-1.5 h-1.5 bg-[#1a1a1a] border-r border-b border-white/20 rotate-45 ${
+          position === "top" ? "top-full left-1/2 -translate-x-1/2 -translate-y-1/2" : 
+          position === "bottom" ? "bottom-full left-1/2 -translate-x-1/2 translate-y-1/2" :
+          position === "left" ? "left-full top-1/2 -translate-y-1/2 -translate-x-1/2" :
+          "right-full top-1/2 -translate-y-1/2 translate-x-1/2"
+        }`} />
+      </div>
+    </div>
+  );
+};
+
+const Knob = ({ value, min, max, label, color = "orange", size = 60, onChange, tooltip }: any) => {
+  const pct = Math.max(0, Math.min(1, (value - min) / (max - min)));
+  const angle = -135 + pct * 270;
+  const c = size / 2;
+  const r = (size - 16) / 2;
+  const circ = 2 * Math.PI * r;
+  const dash = circ * 0.75;
+  const off = circ - pct * dash;
+  const startRef = useRef<any>(null);
+
+  const colors: any = {
+    orange: ["#f97316", "#fb923c"],
+    purple: ["#a855f7", "#ec4899"],
+    cyan: ["#ffffff", "#e0e0e0"],
+  };
+  const [c1, c2] = colors[color] || colors.orange;
+
+  const handleStart = (e: any) => {
+    const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
+    startRef.current = { y: clientY, val: value };
+    const move = (ev: any) => {
+      if (!startRef.current) return;
+      const cy = "touches" in ev ? ev.touches[0].clientY : ev.clientY;
+      const delta = (startRef.current.y - cy) / 100;
+      let nv = startRef.current.val + delta * (max - min);
+      nv = Math.max(min, Math.min(max, nv));
+      onChange(nv);
+    };
+    const up = () => {
+      startRef.current = null;
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      window.removeEventListener("touchmove", move);
+      window.removeEventListener("touchend", up);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+    window.addEventListener("touchmove", move);
+    window.addEventListener("touchend", up);
+  };
+
+  return (
+    <Tooltip text={tooltip} position="top">
+      <div id={`knob-${label.replace(/\s+/g, '-').toLowerCase()}`} className="flex flex-col items-center gap-1.5 md:gap-2 select-none group">
+        <div
+          className="relative cursor-ns-resize"
+          style={{ width: size * 0.8, height: size * 0.8 }}
+          onMouseDown={handleStart}
+          onTouchStart={handleStart}
+        >
+          <svg width={size * 0.8} height={size * 0.8} className="drop-shadow-lg md:scale-125 md:origin-center">
+            <defs>
+              <linearGradient id={`kg-${color}`} x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stopColor={c1} />
+                <stop offset="100%" stopColor={c2} />
+              </linearGradient>
+            </defs>
+            <circle cx={c} cy={c} r={r} fill="none" stroke="#141414" strokeWidth={10} />
+            <circle cx={c} cy={c} r={r} fill="none" stroke={`url(#kg-${color})`} strokeWidth={10} strokeDasharray={`${dash} ${circ}`} strokeDashoffset={off} strokeLinecap="round" transform={`rotate(135 ${c} ${c})`} />
+            <line x1={c} y1={c} x2={c + Math.cos(((angle - 90) * Math.PI) / 180) * (r - 4)} y2={c + Math.sin(((angle - 90) * Math.PI) / 180) * (r - 4)} stroke="#fff" strokeWidth={3} strokeLinecap="round" />
+          </svg>
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <span className="text-[11px] font-mono font-bold text-[#E0E0E0]">{value.toFixed(1)}</span>
+          </div>
+        </div>
+        <span className="text-[9px] font-mono tracking-[0.2em] text-neutral-500 uppercase font-bold">{label}</span>
+      </div>
+    </Tooltip>
+  );
+};
+
+export default function App() {
+  const [view, setView] = useState<"discover" | "eq-studio" | "tidal">("discover");
+  const [engine, setEngine] = useState<AudioEngine | null>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const playPromiseRef = useRef<Promise<void> | null>(null);
+
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTrack, setCurrentTrack] = useState<any>(null);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [searchQuery, setSearchQuery] = useState("Rush, Daft Punk");
+  const [tracks, setTracks] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const [bands, setBands] = useState([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+  const [drive, setDrive] = useState(1.0);
+  const [warmth, setWarmth] = useState(1.1);
+  const [reverbMix, setReverbMix] = useState(0.15);
+  const [neuralDepth, setNeuralDepth] = useState(0.3);
+  const [neuralBoost, setNeuralBoost] = useState(0.5);
+  const [masterGain, setMasterGain] = useState(1.0);
+  const [isBypassed, setIsBypassed] = useState(false);
+  const [aiMode, setAiMode] = useState(false);
+  const [mutationActive, setMutationActive] = useState(false);
+  const [neuralAutoActive, setNeuralAutoActive] = useState(false);
+  const [streamActive, setStreamActive] = useState(false);
+  const [youtubeQuery, setYoutubeQuery] = useState("daft punk");
+  const [youtubeResults, setYoutubeResults] = useState<any[]>([]);
+  const [youtubeLoading, setYoutubeLoading] = useState(false);
+  const [showYoutube, setShowYoutube] = useState(false);
+  const [micActive, setMicActive] = useState(false);
+  const [correctionHash, setCorrectionHash] = useState("AE-77-F4-12-00-B1");
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [isConverged, setIsConverged] = useState(true);
+
+  // TIDAL State
+  const [useTidal, setUseTidal] = useState(false);
+  const [tidalTracks, setTidalTracks] = useState<TidalTrack[]>([]);
+  const tidalService = useRef<TidalService | null>(null);
+
+  useEffect(() => {
+    const savedId = localStorage.getItem('tidal_client_id') || "YOUR_CLIENT_ID";
+    tidalService.current = new TidalService(savedId);
+    
+    // Handle PKCE OAuth callback
+    const searchParams = new URLSearchParams(window.location.search);
+    const code = searchParams.get('code');
+    if (code && tidalService.current) {
+      tidalService.current.handleCallback(code).then(success => {
+        if (success) {
+          setUseTidal(true);
+          fetchInitialAssortment();
+        }
+      });
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+    
+    // Restore TIDAL state if already authenticated
+    if (tidalService.current.isAuthenticated()) {
+      setUseTidal(true);
+    }
+  }, []);
+
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [navExpanded, setNavExpanded] = useState(true);
+  const [presetsExpanded, setPresetsExpanded] = useState(true);
+  const [dspExpanded, setDspExpanded] = useState(true);
+  const [language, setLanguage] = useState("es");
+  const [themeColor, setThemeColor] = useState("cyan");
+
+  const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedOutputId, setSelectedOutputId] = useState<string>("");
+
+  const fetchAudioDevices = async () => {
+    try {
+      await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => {});
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      setOutputDevices(devices.filter(device => device.kind === 'audiooutput'));
+    } catch (e) { console.error("Could not fetch devices", e); }
+  };
+
+  useEffect(() => { fetchAudioDevices(); }, [isSettingsOpen]);
+
+  const handleOutputChange = async (deviceId: string) => {
+    setSelectedOutputId(deviceId);
+    if (audioRef.current && typeof (audioRef.current as any).setSinkId === 'function') {
+      try { await (audioRef.current as any).setSinkId(deviceId); } catch (e) { console.error(e); }
+    }
+    if (engine) engine.setOutputDevice(deviceId);
+  };
+
+  useEffect(() => {
+    fetchInitialAssortment();
+  }, [useTidal]);
+
+  useEffect(() => {
+    let interval: any;
+    if (isPlaying && engine) {
+      interval = setInterval(async () => {
+        const result = await engine.getHash();
+        setIsConverged(result.converged);
+      }, 2000);
+    }
+    return () => clearInterval(interval);
+  }, [isPlaying, engine]);
+
+  const searchYoutube = async (q: string) => {
+    setYoutubeLoading(true);
+    try {
+      // Use YouTube's public search (no API key needed via RSS/oembed workaround)
+      const res = await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(q)}&type=video&videoCategoryId=10&maxResults=12&key=AIzaSyD-9tSrke72PouQMnMX-a7eZSW0jkFMBWY`);
+      if (!res.ok) throw new Error("YT API failed");
+      const data = await res.json();
+      setYoutubeResults(data.items || []);
+    } catch {
+      // Fallback: curated list
+      setYoutubeResults([
+        { id: { videoId: 'GugsCdLHm-Q' }, snippet: { title: 'Get Lucky - Daft Punk', channelTitle: 'Daft Punk', thumbnails: { medium: { url: 'https://img.youtube.com/vi/GugsCdLHm-Q/mqdefault.jpg' } } } },
+        { id: { videoId: 'oZRsJuDATCo' }, snippet: { title: 'Blinding Lights - The Weeknd', channelTitle: 'The Weeknd', thumbnails: { medium: { url: 'https://img.youtube.com/vi/oZRsJuDATCo/mqdefault.jpg' } } } },
+        { id: { videoId: 'JGwWNGJdvx8' }, snippet: { title: 'Shape of You - Ed Sheeran', channelTitle: 'Ed Sheeran', thumbnails: { medium: { url: 'https://img.youtube.com/vi/JGwWNGJdvx8/mqdefault.jpg' } } } },
+        { id: { videoId: '09R8_2nJtjg' }, snippet: { title: 'Sugar - Maroon 5', channelTitle: 'Maroon 5', thumbnails: { medium: { url: 'https://img.youtube.com/vi/09R8_2nJtjg/mqdefault.jpg' } } } },
+        { id: { videoId: 'lWA2pjMjpBs' }, snippet: { title: 'Levitating - Dua Lipa', channelTitle: 'Dua Lipa', thumbnails: { medium: { url: 'https://img.youtube.com/vi/lWA2pjMjpBs/mqdefault.jpg' } } } },
+        { id: { videoId: 'fHI8X4OXluQ' }, snippet: { title: 'One More Time - Daft Punk', channelTitle: 'Daft Punk', thumbnails: { medium: { url: 'https://img.youtube.com/vi/fHI8X4OXluQ/mqdefault.jpg' } } } },
+      ]);
+    }
+    setYoutubeLoading(false);
+  };
+
+  const fetchInitialAssortment = async () => {
+    setLoading(true);
+    
+    if (useTidal && tidalService.current) {
+      const results = await tidalService.current.search("daft punk");
+      setTidalTracks(results);
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const res = await fetch(`https://itunes.apple.com/search?term=daft+punk&entity=song&limit=12`);
+      const data = await res.json();
+      setTracks(data.results || []);
+    } catch (e) { setErrorMsg("Failed to fetch tracks."); }
+    setLoading(false);
+  };
+
+  const fetchTracks = async (query: string) => {
+    setLoading(true);
+
+    if (useTidal && tidalService.current) {
+      const results = await tidalService.current.search(query);
+      setTidalTracks(results);
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const res = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=song&limit=18`);
+      const data = await res.json();
+      setTracks(data.results || []);
+    } catch (e) { setErrorMsg("Failed to fetch tracks."); }
+    setLoading(false);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && audioRef.current) {
+      const url = URL.createObjectURL(file);
+      setCurrentTrack({
+        trackName: file.name,
+        artistName: "Local Archive",
+        artworkUrl100: ""
+      });
+      audioRef.current.src = url;
+      
+      playPromiseRef.current = audioRef.current.play();
+      playPromiseRef.current.then(async () => {
+        setIsPlaying(true);
+        const ae = await getOrCreateEngine();
+        if (ae) ae.connectMediaElement(audioRef.current!);
+        playPromiseRef.current = null;
+      }).catch(err => {
+        console.warn("Play interrupted or failed:", err);
+        playPromiseRef.current = null;
+      });
+    }
+  };
+
+  const toggleMutation = () => {
+    const nextValue = !mutationActive;
+    setMutationActive(nextValue);
+    engine?.setFeatureToggle('quantumMutation', nextValue);
+  };
+
+  const toggleNeuralAuto = () => {
+    const nextValue = !neuralAutoActive;
+    setNeuralAutoActive(nextValue);
+    engine?.setFeatureToggle('neuralAutoEq', nextValue);
+  };
+
+  const handleResetSync = () => {
+    if (!engine) return;
+    engine.resetSync();
+  };
+
+  const handleVerifyIntegrity = async () => {
+    if (!engine || isVerifying) return;
+    setIsVerifying(true);
+    // Simulate scan
+    setTimeout(async () => {
+      const result = await engine.getHash();
+      setCorrectionHash(result.hash);
+      setIsConverged(result.converged);
+      setIsVerifying(false);
+    }, 1200);
+  };
+
+  const getOrCreateEngine = async () => {
+    if (engine) return engine;
+    try {
+      const ae = new AudioEngine();
+      await ae.initWorklet();
+      setEngine(ae);
+      return ae;
+    } catch (e: any) { setErrorMsg(`Engine init failed: ${e.message}`); return null; }
+  };
+
+  const playTrack = async (track: any) => {
+    setCurrentTrack(track);
+    if (!audioRef.current) return;
+    
+    // Resume context on user gesture
+    const ae = await getOrCreateEngine();
+    if (ae && ae.ctx.state === "suspended") {
+      await ae.ctx.resume();
+    }
+
+    audioRef.current.src = track.previewUrl;
+    playPromiseRef.current = audioRef.current.play();
+    playPromiseRef.current.then(() => {
+      setIsPlaying(true);
+      if (ae) ae.connectMediaElement(audioRef.current!);
+      playPromiseRef.current = null;
+    }).catch(err => {
+      console.warn("Play interrupted or failed:", err);
+      playPromiseRef.current = null;
+    });
+  };
+
+  const togglePlay = async () => {
+    if (!audioRef.current) return;
+    
+    const ae = await getOrCreateEngine();
+    if (ae && ae.ctx.state === "suspended") {
+      await ae.ctx.resume();
+    }
+
+    if (audioRef.current.paused) {
+      playPromiseRef.current = audioRef.current.play();
+      playPromiseRef.current.then(() => {
+        setIsPlaying(true);
+        playPromiseRef.current = null;
+      }).catch(err => {
+        console.warn("Play interrupted or failed:", err);
+        playPromiseRef.current = null;
+      });
+    } else {
+      // Safely handle pause if a play is pending
+      if (playPromiseRef.current) {
+        await playPromiseRef.current.catch(() => {});
+      }
+      audioRef.current.pause();
+      setIsPlaying(false);
+    }
+  };
+
+  useEffect(() => {
+    let raf: number;
+    const draw = () => {
+      if (engine && canvasRef.current && view === "eq-studio") {
+        const c = canvasRef.current, ctx = c.getContext("2d")!;
+        const w = c.width, h = c.height;
+        const data = new Uint8Array(engine.analyserNode.frequencyBinCount);
+        engine.analyserNode.getByteFrequencyData(data);
+        ctx.fillStyle = "rgba(10, 10, 10, 0.2)";
+        ctx.fillRect(0, 0, w, h);
+        const centerX = w / 2, centerY = h / 2;
+        for (let i = 0; i < data.length; i += 8) {
+          const amp = data[i] / 255;
+          const angle = (i / data.length) * Math.PI * 2;
+          const r = 100 + amp * 120;
+          ctx.beginPath();
+          ctx.strokeStyle = i % 16 === 0 ? `rgba(249, 115, 22, ${amp})` : `rgba(255, 255, 255, ${amp * 0.5})`;
+          ctx.lineWidth = 2;
+          ctx.moveTo(centerX, centerY);
+          ctx.lineTo(centerX + Math.cos(angle) * r, centerY + Math.sin(angle) * r);
+          ctx.stroke();
+        }
+      }
+      raf = requestAnimationFrame(draw);
+    };
+    draw();
+    return () => cancelAnimationFrame(raf);
+  }, [engine, view]);
+
+  return (
+    <div id="app-root" className="flex h-screen bg-[#0A0A0A] text-[#E0E0E0] font-sans selection:bg-orange-500/30 overflow-hidden relative flex-col md:flex-row">
+      <aside className="hidden md:flex w-56 border-r border-white/5 bg-[#0C0C0C] flex-col z-20">
+        <div className="p-4">
+          <div className="flex items-center gap-3 mb-8">
+            <div className="w-6 h-6 bg-white flex items-center justify-center rounded-sm">
+              <div className="w-3 h-3 border-2 border-[#0A0A0A]"></div>
+            </div>
+            <div>
+              <h1 className="text-lg font-serif tracking-tight text-white leading-none">IVANNURI</h1>
+              <span className="text-[8px] font-sans italic opacity-40 uppercase tracking-tighter">Omega Processor</span>
+            </div>
+          </div>
+          <nav className="space-y-6">
+            <div>
+              <button 
+                onClick={() => setNavExpanded(!navExpanded)}
+                className="flex items-center justify-between w-full text-[9px] uppercase tracking-widest text-neutral-500 mb-3 group hover:text-white transition-colors"
+              >
+                <span>Navigator</span>
+                {navExpanded ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+              </button>
+              <AnimatePresence>
+                {navExpanded && (
+                  <motion.ul 
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    className="space-y-3 overflow-hidden"
+                  >
+                    {[
+                      ['discover', Layout, 'nav.discover'],
+                      ['eq-studio', Waves, 'nav.studio'],
+                      ['tidal', Disc, 'nav.integration']
+                    ].map(([v, Icon, key]: any) => (
+                      <li 
+                        key={v} 
+                        onClick={() => setView(v)} 
+                        className={`flex items-center gap-3 cursor-pointer transition-all ${view === v ? "text-white" : "opacity-40 hover:opacity-100"}`}
+                      >
+                        {view === v && <motion.div layoutId="nav-dot" className="w-1.5 h-1.5 bg-orange-500 rounded-full shadow-[0_0_8px_rgba(249,115,22,0.6)]" />}
+                        <span className="text-sm font-sans">{t(key, language)}</span>
+                      </li>
+                    ))}
+                  </motion.ul>
+                )}
+              </AnimatePresence>
+            </div>
+
+            <div className="pt-3 border-t border-white/5">
+              <button 
+                onClick={() => setPresetsExpanded(!presetsExpanded)}
+                className="flex items-center justify-between w-full text-[9px] uppercase tracking-widest text-neutral-500 mb-3 group hover:text-white transition-colors"
+              >
+                <span>Topology Presets</span>
+                {presetsExpanded ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+              </button>
+              <AnimatePresence>
+                {presetsExpanded && (
+                  <motion.ul 
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    className="space-y-2 overflow-hidden"
+                  >
+                    {Object.keys(PRESETS).map((p) => (
+                      <li 
+                        key={p} 
+                        onClick={() => {
+                          const config = PRESETS[p];
+                          setBands(config.bands);
+                          setDrive(config.drive);
+                          setWarmth(config.warmth);
+                          engine?.setDrive(config.drive);
+                          engine?.setWarmth(config.warmth);
+                          config.bands.forEach((v: any, i: any) => engine?.setBandGain(i, v));
+                        }}
+                        className="text-[9px] font-mono opacity-40 hover:opacity-100 hover:text-orange-500 cursor-pointer transition-all uppercase tracking-wider pl-1"
+                      >
+                        {p}
+                      </li>
+                    ))}
+                  </motion.ul>
+                )}
+              </AnimatePresence>
+            </div>
+
+            <div className="pt-3 border-t border-white/5">
+              <button 
+                onClick={() => setDspExpanded(!dspExpanded)}
+                className="flex items-center justify-between w-full text-[9px] uppercase tracking-widest text-neutral-500 mb-3 group hover:text-white transition-colors"
+              >
+                <span>DSP CORE</span>
+                {dspExpanded ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+              </button>
+              <AnimatePresence>
+                {dspExpanded && (
+                  <motion.div 
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    className="space-y-2 overflow-hidden"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-[9px] text-zinc-500 uppercase font-mono">Neural Sync</span>
+                      <div className={`w-1.5 h-1.5 rounded-full ${isConverged ? 'bg-emerald-500' : 'bg-orange-500 animate-pulse'}`} />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[9px] text-zinc-500 uppercase font-mono">Mutation</span>
+                      <span className={`text-[9px] ${mutationActive ? 'text-orange-400' : 'text-zinc-700'}`}>{mutationActive ? 'ON' : 'OFF'}</span>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          </nav>
+        </div>
+        <div className="mt-auto p-6 border-t border-white/5">
+          <div className="p-4 border border-white/10 rounded bg-white/5">
+            <p className="text-[10px] uppercase tracking-widest text-neutral-500 mb-2">DSP Utilization</p>
+            <div className="w-full h-1 bg-neutral-800">
+              <div className="bg-white w-[14%] h-full"></div>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <main className="flex-1 flex flex-col relative overflow-hidden bg-[#0A0A0A]">
+        <header className="h-12 border-b border-white/10 flex items-center justify-between px-4 md:px-6 bg-[#0F0F0F] z-10">
+          <div className="flex gap-4 md:gap-6 text-[8px] md:text-[10px] uppercase tracking-[0.1em] md:tracking-[0.2em] opacity-70">
+            <div className="flex items-center gap-1 md:gap-1.5">
+              <div className={`w-1 h-1 rounded-full ${isPlaying ? "bg-orange-500 animate-pulse" : "bg-zinc-700"}`} />
+              <span className="hidden xs:inline">Session: {isPlaying ? "Active" : "Idle"}</span>
+            </div>
+            <span className="hidden md:inline">Bit Depth: 32-bit</span>
+            <span className={`${isPlaying ? "text-orange-400" : ""} truncate max-w-[80px] md:max-w-none`}>Target: {isPlaying ? "Output" : "Standby"}</span>
+          </div>
+          <div className="flex items-center gap-2 md:gap-3">
+            {view === "discover" && (
+              <div className="relative hidden sm:block">
+                {useTidal ? <Disc size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-cyan-400 animate-spin-slow" /> : <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-500" />}
+                <input 
+                  type="text" 
+                  placeholder={useTidal ? "Search TIDAL Engine..." : t('search.placeholder', language)} 
+                  value={searchQuery} 
+                  onChange={(e) => setSearchQuery(e.target.value)} 
+                  onKeyDown={(e) => e.key === "Enter" && fetchTracks(searchQuery)} 
+                  className={`bg-black/40 border rounded-sm pl-8 pr-3 py-1 text-[10px] font-mono focus:outline-none w-24 md:w-48 text-[#E0E0E0] transition-all ${useTidal ? 'border-cyan-500/30 focus:border-cyan-500/60' : 'border-white/10 focus:border-white/30'}`} 
+                />
+              </div>
+            )}
+            <Tooltip text={t('tt.settings', language)} position="bottom">
+              <button onClick={() => setIsSettingsOpen(true)} className="w-8 h-8 flex items-center justify-center rounded-sm border border-white/10 text-neutral-500 hover:text-white transition-colors">
+                <Settings size={16} />
+              </button>
+            </Tooltip>
+          </div>
+        </header>
+
+        <div className="flex-1 overflow-y-auto p-4 md:p-6 custom-scrollbar relative">
+          <AnimatePresence mode="wait">
+            {view === "discover" && (
+              <motion.div key="discover" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="max-w-6xl mx-auto space-y-6 md:space-y-8">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-end border-b border-white/10 pb-4 gap-4">
+                  <div>
+                    <h2 className="text-xl md:text-3xl font-serif italic text-white leading-tight">Music Discovery</h2>
+                    <p className="text-neutral-500 text-[10px] md:text-xs mt-1">Access high-fidelity source tracks for neural processing.</p>
+                  </div>
+                  <div className="flex gap-2 md:gap-3 w-full md:w-auto flex-wrap sm:flex-nowrap">
+                    {useTidal && (
+                      <button 
+                        onClick={() => tidalService.current?.login()}
+                        className="flex-1 md:flex-none px-4 py-2 text-[9px] md:text-[10px] uppercase tracking-widest border border-cyan-500/20 text-cyan-400 hover:bg-cyan-500/10 transition-all"
+                      >
+                        Login TIDAL
+                      </button>
+                    )}
+                    <button 
+                      onClick={() => { setUseTidal(false); }}
+                      className={`flex-1 md:flex-none px-4 py-2 text-[9px] md:text-[10px] uppercase tracking-widest border transition-all ${!useTidal ? 'border-orange-500 bg-orange-500/10 text-orange-500' : 'border-white/10 text-zinc-500 hover:border-white/20'}`}
+                    >
+                      Archive
+                    </button>
+                    <button 
+                      onClick={() => { setUseTidal(true); setShowYoutube(false); }}
+                      className={`flex-1 md:flex-none px-4 py-2 text-[9px] md:text-[10px] uppercase tracking-widest border transition-all ${useTidal && !showYoutube ? 'border-cyan-500 bg-cyan-500/10 text-cyan-500' : 'border-white/10 text-zinc-500 hover:border-white/20'}`}
+                    >
+                      TIDAL Core
+                    </button>
+                    <button 
+                      onClick={() => { setShowYoutube(!showYoutube); setUseTidal(false); if (!showYoutube) searchYoutube(youtubeQuery); }}
+                      className={`flex-1 md:flex-none px-4 py-2 text-[9px] md:text-[10px] uppercase tracking-widest border transition-all ${showYoutube ? 'border-red-500 bg-red-500/10 text-red-400' : 'border-white/10 text-zinc-500 hover:border-white/20'}`}
+                    >
+                      ▶ YouTube
+                    </button>
+                    <div className="w-px h-8 bg-white/10 hidden sm:block mx-1" />
+                    <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="audio/*" className="hidden" />
+                    <Tooltip text={t('tt.local', language)} position="bottom">
+                      <button 
+                        onClick={() => fileInputRef.current?.click()} 
+                        className="flex-1 md:flex-none px-4 md:px-6 py-2 border border-white/20 text-neutral-400 text-[9px] md:text-[10px] uppercase tracking-widest hover:border-white hover:text-white transition-colors flex items-center justify-center gap-2"
+                      >
+                        <FolderOpen size={14} />
+                        {t('btn.local', language)}
+                      </button>
+                    </Tooltip>
+                    <Tooltip text="Capturar audio del sistema o pestaña" position="bottom">
+                      <button 
+                        onClick={async () => {
+                          try {
+                            const ae = await getOrCreateEngine();
+                            if (!ae) return;
+                            const result = await ae.captureSystemAudio();
+                            setIsPlaying(true);
+                            setCurrentTrack({
+                              trackName: result === "mic" ? "Micrófono Activo" : "System Capture",
+                              artistName: result === "mic" ? "Entrada de Micro" : "Tab / App Audio",
+                              artworkUrl100: "https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=100&h=100&fit=crop"
+                            } as any);
+                          } catch (e: any) {
+                            setErrorMsg("Captura de audio no disponible: " + (e.message || "Permiso denegado"));
+                          }
+                        }}
+                        className="flex-1 md:flex-none px-4 md:px-6 py-2 border border-orange-500/30 text-orange-500/70 text-[9px] md:text-[10px] uppercase tracking-widest hover:bg-orange-500 hover:text-black transition-all flex items-center justify-center gap-2"
+                      >
+                        <Activity size={14} />
+                        Capture
+                      </button>
+                    </Tooltip>
+                    <Tooltip text={t('tt.refresh', language)} position="bottom">
+                      <button onClick={() => fetchTracks(searchQuery)} className="flex-1 md:flex-none px-4 md:px-6 py-2 border border-white text-white text-[9px] md:text-[10px] uppercase tracking-widest hover:bg-white hover:text-black transition-colors">Refresh</button>
+                    </Tooltip>
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 md:gap-4">
+                  {useTidal ? (
+                    tidalTracks.map((track) => (
+                      <div 
+                        key={track.id} 
+                        className="group cursor-pointer bg-[#0a1a1f] border border-cyan-500/20 p-2.5 md:p-3 hover:border-cyan-500/50 transition-all"
+                        onClick={() => {
+                          setIsPlaying(true);
+                          setCurrentTrack({
+                            trackName: track.title,
+                            artistName: track.artist.name,
+                            artworkUrl100: track.album.cover,
+                            previewUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
+                            isrc: track.isrc,
+                            quality: track.quality,
+                            releaseDate: track.releaseDate,
+                            copyright: track.copyright,
+                            artistId: track.artist.id,
+                            albumId: track.album.id
+                          } as any);
+                          engine?.playPreset("PURE BYPASS");
+                        }}
+                      >
+                        <div className="relative aspect-square overflow-hidden mb-2.5 bg-neutral-900 border border-white/5">
+                          <img src={track.album.cover} alt={track.title} className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity" />
+                          <div className="absolute inset-0 bg-cyan-900/20 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                            <div className="w-8 h-8 border border-cyan-400 bg-cyan-500/20 text-cyan-400 flex items-center justify-center rounded-full"><Play size={16} fill="currentColor" /></div>
+                          </div>
+                          <div className="absolute top-1 left-1 px-1 bg-cyan-500 text-[6px] text-black font-bold uppercase">HiFi</div>
+                        </div>
+                        <h3 className="text-[10px] md:text-xs font-serif text-white truncate">{track.title}</h3>
+                        <p className="text-[8px] md:text-[9px] uppercase tracking-tighter text-cyan-500/70 mt-0.5 truncate">{track.artist.name}</p>
+                        <div className="mt-2 flex gap-1 items-center opacity-40 group-hover:opacity-100 transition-opacity">
+                          <span className="text-[6px] border border-white/20 px-1 font-mono">{track.isrc || 'ISRC-N/A'}</span>
+                          <span className="text-[6px] border border-white/20 px-1 font-mono">{track.id}</span>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    tracks.map((track) => (
+                      <div key={track.trackId} className="group cursor-pointer bg-[#141414] border border-white/10 p-2.5 md:p-3 hover:border-white/30 transition-all" onClick={() => playTrack(track)}>
+                        <div className="relative aspect-square overflow-hidden mb-2.5 bg-neutral-900 border border-white/5">
+                          <img src={track.artworkUrl100?.replace("100x100", "400x400")} alt={track.trackName} className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity duration-700" />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                            <div className="w-8 h-8 border border-white bg-white/10 text-white flex items-center justify-center rounded-full"><Play size={16} fill="white" className="ml-0.5" /></div>
+                          </div>
+                        </div>
+                        <h3 className="text-[10px] md:text-xs font-serif text-white truncate">{track.trackName}</h3>
+                        <p className="text-[8px] md:text-[9px] uppercase tracking-tighter text-neutral-500 mt-0.5 truncate">{track.artistName}</p>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* YouTube Panel */}
+                {showYoutube && (
+                  <div className="mt-4">
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+                      <span className="text-[10px] font-mono uppercase tracking-widest text-red-400">YouTube Engine</span>
+                      <div className="flex-1 flex gap-2">
+                        <input
+                          type="text"
+                          value={youtubeQuery}
+                          onChange={e => setYoutubeQuery(e.target.value)}
+                          onKeyDown={e => e.key === 'Enter' && searchYoutube(youtubeQuery)}
+                          placeholder="Buscar en YouTube..."
+                          className="flex-1 bg-black/40 border border-red-500/20 px-3 py-1 text-[10px] font-mono text-red-300 focus:outline-none focus:border-red-500/50"
+                        />
+                        <button onClick={() => searchYoutube(youtubeQuery)} className="px-4 py-1 bg-red-500 text-black text-[9px] font-bold uppercase hover:bg-red-400 transition-colors">
+                          {youtubeLoading ? '...' : 'Buscar'}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 md:gap-3">
+                      {youtubeResults.map((item: any) => (
+                        <div
+                          key={item.id.videoId}
+                          className="group cursor-pointer bg-[#120808] border border-red-900/30 p-2 hover:border-red-500/50 transition-all"
+                          onClick={() => {
+                            const url = `https://www.youtube.com/watch?v=${item.id.videoId}`;
+                            window.open(url, '_blank');
+                            setCurrentTrack({
+                              trackName: item.snippet.title,
+                              artistName: item.snippet.channelTitle + ' — Abriendo en YouTube',
+                              artworkUrl100: item.snippet.thumbnails.medium.url,
+                              previewUrl: ''
+                            } as any);
+                          }}
+                        >
+                          <div className="relative aspect-video overflow-hidden mb-2 bg-neutral-900 border border-white/5">
+                            <img src={item.snippet.thumbnails.medium.url} alt={item.snippet.title} className="w-full h-full object-cover opacity-70 group-hover:opacity-100 transition-opacity" />
+                            <div className="absolute inset-0 bg-red-900/20 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                              <div className="w-8 h-8 border border-red-400 bg-red-500/20 text-red-400 flex items-center justify-center rounded-full"><Play size={14} fill="currentColor" /></div>
+                            </div>
+                            <div className="absolute top-1 left-1 px-1 bg-red-600 text-[6px] text-white font-bold uppercase">YT</div>
+                          </div>
+                          <h3 className="text-[9px] font-serif text-white truncate leading-tight">{item.snippet.title}</h3>
+                          <p className="text-[7px] uppercase tracking-tighter text-red-400/60 mt-0.5 truncate">{item.snippet.channelTitle}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-3 p-3 bg-red-500/5 border border-red-500/10 text-[9px] text-red-400/60 font-mono">
+                      💡 Abre la canción en YouTube → usa el botón Capture para procesar el audio a través del motor DSP
+                    </div>
+                  </div>
+                )}
+              </motion.div>
+            )}
+
+            {view === "eq-studio" && (
+              <motion.div key="eq-studio" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-7xl mx-auto grid grid-cols-12 gap-3 md:gap-6 h-full">
+                <div className="col-span-12 lg:col-span-4 flex flex-col gap-3 md:gap-4">
+                  <div className="h-[300px]">
+                     <ObjectExplorer trackMetadata={currentTrack} />
+                  </div>
+                  <div className="bg-[#141414] border border-white/10 p-3 md:p-4 flex flex-col aspect-video md:aspect-square">
+                    <div className="flex justify-between items-center mb-1.5 md:mb-2 opacity-50">
+                      <span className="text-[8px] md:text-[9px] font-mono tracking-widest uppercase">FFT Spectrum Analysis</span>
+                      <span className="text-[8px] md:text-[9px] font-mono">Live</span>
+                    </div>
+                    <div className="flex-1 bg-black border border-white/5 relative flex items-center justify-center overflow-hidden">
+                       <canvas ref={canvasRef} width={800} height={800} className="w-full h-full object-cover opacity-80" />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <PsychometricChart data={{
+                      transparency: isPlaying ? 8.4 + Math.sin(Date.now() / 1000) * 0.5 : 5,
+                      warmth: warmth * 1.5 + 2,
+                      impact: 7.2 + (isPlaying ? Math.cos(Date.now() / 1200) * 0.3 : 0),
+                      depth: 6.5,
+                      neurality: neuralBoost * 10
+                    }} />
+                    <div className="flex flex-col gap-3">
+                      <SRSGauge value={isPlaying ? 94.2 + Math.random() * 2 : 0} />
+                      <GridDisplay active={isPlaying} />
+                    </div>
+                  </div>
+
+                  <div className="bg-[#111111] border border-white/10 p-4 md:p-6 grid grid-cols-2 gap-y-4 md:gap-y-6 gap-x-2">
+                    <Knob label="DRIVE" value={drive} min={1} max={10} color="orange" tooltip={t('tt.drive', language)} size={60} onChange={(v: any) => { setDrive(v); engine?.setDrive(v); }} />
+                    <Knob label="WARMTH" value={warmth} min={0} max={5} color="cyan" tooltip={t('tt.warmth', language)} size={60} onChange={(v: any) => { setWarmth(v); engine?.setWarmth(v); }} />
+                    <Knob label="REVERB" value={reverbMix} min={0} max={1} color="purple" tooltip={t('tt.reverb', language)} size={60} onChange={(v: any) => { setReverbMix(v); }} />
+                    <Knob label={t('label.neuralBoost', language)} value={neuralBoost} min={0} max={1} color="orange" tooltip={t('tt.neuralBoost', language)} size={60} onChange={(v: any) => { setNeuralBoost(v); engine?.setNeuralBoost(v); }} />
+                  </div>
+                </div>
+                <div className="col-span-12 lg:col-span-8 bg-[#141414] border border-white/10 p-4 md:p-6 flex flex-col min-h-[350px]">
+                  <h3 className="text-base md:text-lg font-serif text-white italic mb-4 md:mb-6 border-b border-white/5 pb-3">Analog Topology EQ</h3>
+                  <div className="flex-1 flex items-end gap-1 px-0.5 md:px-1">
+                    {bands.map((val, i) => (
+                      <div key={i} className="flex-1 flex flex-col items-center h-full">
+                        <Tooltip text={t('tt.eqBand', language)} position="top">
+                          <div className="flex-1 w-full bg-neutral-900 border border-white/10 relative overflow-hidden">
+                             <div className="absolute left-0 w-full bg-orange-500 opacity-40 shadow-[0_0_15px_rgba(249,115,22,0.3)] transition-all" style={{ height: `${Math.abs(val)*4.1}%`, bottom: val >= 0 ? "50%" : "auto", top: val < 0 ? "50%" : "auto" }} />
+                             <input type="range" min="-12" max="12" step="0.5" value={val} onChange={(e) => { 
+                               const nv = parseFloat(e.target.value); 
+                               setBands(p => { const b = [...p]; b[i] = nv; return b; }); 
+                               engine?.setBandGain(i, nv); 
+                             }} className="absolute inset-0 w-full h-full opacity-0 cursor-ns-resize z-10" />
+                          </div>
+                        </Tooltip>
+                        <span className="mt-3 md:mt-4 text-[7px] md:text-[9px] font-mono text-neutral-500 uppercase tracking-widest">{[31,62,125,250,500,'1k','2k','4k','8k','16k'][i]}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="mt-6">
+                    <NeuralArchitecture active={isPlaying} />
+                  </div>
+
+                  <div className="mt-4 md:mt-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
+                    <Tooltip text={t('tt.hash', language)} position="top">
+                      <button 
+                        onClick={handleVerifyIntegrity}
+                        className={`p-2.5 md:p-3 border border-white/10 bg-white/5 text-left transition-all hover:bg-white/10 ${isVerifying ? 'animate-pulse border-orange-500/50' : ''} w-full`}
+                      >
+                         <h4 className="text-[7px] md:text-[8px] uppercase tracking-widest mb-0.5 opacity-50">{t('btn.hash', language)}</h4>
+                         <div className="font-mono text-[8px] md:text-[9px] opacity-40">{isVerifying ? "SCANNING..." : correctionHash}</div>
+                      </button>
+                    </Tooltip>
+                    <Tooltip text={t('tt.sync', language)} position="top">
+                      <button 
+                        onClick={handleResetSync}
+                        className="bg-orange-500/5 p-2.5 md:p-3 border border-orange-500/10 flex flex-col justify-center text-left hover:bg-orange-500/10 transition-colors w-full"
+                      >
+                         <h4 className="text-[7px] md:text-[8px] uppercase tracking-widest mb-0.5 text-orange-500/70">Sync Status</h4>
+                         <div className="font-mono text-[8px] md:text-[9px] text-orange-500/50">
+                           {isConverged ? "LOCKED" : "RE-SYNCH"}
+                         </div>
+                      </button>
+                    </Tooltip>
+                    <div className="grid grid-cols-2 gap-2 md:gap-3">
+                      <Tooltip text={t('tt.mutate', language)} position="top">
+                        <button 
+                          onClick={toggleMutation}
+                          className={`p-2 md:p-2.5 border transition-all uppercase tracking-widest text-[7px] md:text-[8px] font-bold flex flex-col items-center justify-center gap-1.5 w-full h-full ${mutationActive ? 'bg-orange-500 text-black border-orange-400' : 'bg-white/5 text-neutral-500 border-white/10 hover:border-white/30 hover:text-white'}`}
+                        >
+                          {t('btn.mutate', language)}
+                        </button>
+                      </Tooltip>
+                      <Tooltip text={t('tt.neural', language)} position="top">
+                        <button 
+                          onClick={toggleNeuralAuto}
+                          className={`p-2 md:p-2.5 border transition-all uppercase tracking-widest text-[7px] md:text-[8px] font-bold flex flex-col items-center justify-center gap-1.5 w-full h-full ${neuralAutoActive ? 'bg-white text-black border-white' : 'bg-white/5 text-neutral-500 border-white/10 hover:border-white/30 hover:text-white'}`}
+                        >
+                          {t('btn.neural', language)}
+                        </button>
+                      </Tooltip>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
+            {view === "tidal" && (
+              <motion.div key="integration" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-5xl mx-auto flex flex-col items-center justify-center min-h-[600px] py-12">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 w-full">
+                  
+                  {/* Configuration Panel */}
+                  <div className="bg-[#141414] border border-white/10 p-6 flex flex-col">
+                    <div className="flex items-center gap-2 mb-6">
+                      <Settings size={14} className="text-cyan-500" />
+                      <h3 className="text-[10px] font-mono uppercase tracking-widest text-white">Engine Configuration</h3>
+                    </div>
+                    
+                    <div className="space-y-4">
+                      <div>
+                        <div className="flex justify-between items-center mb-1">
+                          <label className="text-[8px] font-mono text-zinc-500 block">TIDAL_CLIENT_ID</label>
+                          {tidalService.current?.getClientId() ? <span className="text-[7px] text-green-500 font-bold">SET</span> : <span className="text-[7px] text-red-500">MISSING</span>}
+                        </div>
+                        <input 
+                          type="text" 
+                          placeholder="Paste client_id..."
+                          defaultValue={tidalService.current?.getClientId?.() || ""}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            tidalService.current?.setClientId(val);
+                          }}
+                          className="w-full bg-black border border-white/10 px-3 py-2 text-[10px] font-mono text-cyan-500 focus:border-cyan-500/50 outline-none" 
+                        />
+                      </div>
+                      
+                      <div>
+                        <div className="flex justify-between items-center mb-1">
+                          <label className="text-[8px] font-mono text-zinc-500 block">TIDAL_CLIENT_SECRET</label>
+                          {tidalService.current?.getClientSecret() ? <span className="text-[7px] text-green-500 font-bold">SET</span> : <span className="text-[7px] text-red-500">MISSING</span>}
+                        </div>
+                        <input 
+                          type="password" 
+                          placeholder="Paste client_secret..."
+                          defaultValue={tidalService.current?.getClientSecret() || ""}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            tidalService.current?.setClientSecret(val);
+                          }}
+                          className="w-full bg-black border border-white/10 px-3 py-2 text-[10px] font-mono text-cyan-500 focus:border-cyan-500/50 outline-none" 
+                        />
+                      </div>
+                      
+                      <div>
+                        <div className="flex justify-between items-center mb-1">
+                          <label className="text-[8px] font-mono text-zinc-500 block">TIDAL_ACCESS_TOKEN</label>
+                          {tidalService.current?.isAuthenticated() ? <span className="text-[7px] text-green-500 font-bold">READY</span> : <span className="text-[7px] text-amber-500">AWAIT_BEARER</span>}
+                        </div>
+                        <div className="relative group">
+                          <input 
+                            type="password" 
+                            placeholder="Paste Bearer Token..."
+                            defaultValue={tidalService.current?.getAccessToken() || ""}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              tidalService.current?.setAccessToken(val);
+                            }}
+                            className="w-full bg-black border border-white/10 px-3 py-2 text-[10px] font-mono text-amber-500 focus:border-amber-500/50 outline-none pr-12" 
+                          />
+                          <button 
+                            onClick={() => tidalService.current?.login()}
+                            className="absolute right-1 top-1/2 -translate-y-1/2 bg-cyan-500 text-black text-[7px] px-2 py-1 font-bold hover:bg-cyan-400"
+                          >
+                            LOGIN
+                          </button>
+                        </div>
+                      </div>
+                      
+                      <div className="pt-4 border-t border-white/5 font-mono">
+                        <div className="flex justify-between text-[7px] text-zinc-500 mb-2">
+                           <span>ACCESS_TOKEN:</span>
+                           <span className={tidalService.current?.isAuthenticated() ? "text-green-500" : "text-amber-500"}>
+                             {tidalService.current?.isAuthenticated() ? "VALID_BEARER" : "EMPTY_OR_EXPIRED"}
+                           </span>
+                        </div>
+                        <p className="text-[8px] text-zinc-600 leading-relaxed mb-4">
+                          To get a Client ID, register your app at <a href="https://developer.tidal.com" target="_blank" className="text-cyan-800 underline">developer.tidal.com</a>. Required for Player SDK and Library Metadata access.
+                        </p>
+                        <button 
+                          onClick={() => {
+                            const id = prompt("Enter Client ID:");
+                            if (id) tidalService.current?.setClientId(id);
+                          }}
+                          className="w-full py-2 border border-white/20 text-[9px] font-mono uppercase hover:bg-white hover:text-black transition-all"
+                        >
+                          Manual Provisioning
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Metadata Engine */}
+                  <div className="bg-[#141414] border border-white/10 p-8 flex flex-col items-center text-center">
+                    <div className="w-16 h-16 border border-white/10 flex items-center justify-center mb-6 relative">
+                       <Disc size={30} className={`text-cyan-400 ${isPlaying ? 'animate-spin-slow' : ''}`} />
+                       <div className={`absolute -top-1 -right-1 text-[6px] px-1 text-black font-bold uppercase ${tidalService.current?.isAuthenticated() ? 'bg-cyan-500' : 'bg-zinc-500'}`}>
+                         {tidalService.current?.isAuthenticated() ? 'Connected' : 'Offline'}
+                       </div>
+                    </div>
+                    <h2 className="text-xl font-serif text-white mb-2 italic">Official Library</h2>
+                    <p className="text-neutral-500 text-xs mb-4">OAuth 2.0 PKCE — sin backend. Ingresa tu Client ID, luego presiona Autenticar. Serás redirigido a TIDAL y de vuelta automáticamente.</p>
+                    <div className="w-full mb-4">
+                      <input
+                        type="text"
+                        placeholder="Client ID de developer.tidal.com"
+                        defaultValue={tidalService.current?.getClientId() || ''}
+                        onChange={e => tidalService.current?.setClientId(e.target.value)}
+                        className="w-full bg-black border border-cyan-500/20 px-3 py-2 text-[10px] font-mono text-cyan-400 focus:border-cyan-500/50 outline-none"
+                      />
+                    </div>
+                    <button 
+                      onClick={() => {
+                        const id = (document.querySelector('input[placeholder="Paste client_id..."]') as HTMLInputElement)?.value || tidalService.current?.getClientId();
+                        if (id) tidalService.current?.setClientId(id);
+                        tidalService.current?.login();
+                      }}
+                      className="w-full py-3 bg-cyan-500 text-black text-[10px] font-bold uppercase tracking-widest hover:bg-cyan-400 transition-colors"
+                    >
+                      🔐 Autenticar con PKCE
+                    </button>
+                    {tidalService.current?.isAuthenticated() && (
+                      <button 
+                        onClick={() => { tidalService.current?.logout(); location.reload(); }}
+                        className="mt-2 text-[8px] font-mono text-red-500/50 hover:text-red-500 uppercase tracking-tighter"
+                      >
+                        Disconnect Engine
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Interceptor */}
+                  <div className="bg-[#141414] border border-white/10 p-8 flex flex-col items-center text-center">
+                    <div className="w-16 h-16 border border-white/10 flex items-center justify-center mb-6 relative">
+                       <Waves size={30} className={`text-orange-500 ${streamActive ? 'animate-pulse' : ''}`} />
+                       <div className="absolute -top-1 -right-1 bg-orange-500 text-[6px] px-1 text-black font-bold uppercase">System</div>
+                    </div>
+                    <h2 className="text-xl font-serif text-white mb-2 italic">Audio Capture</h2>
+                    <p className="text-neutral-500 text-xs mb-8">Route audio from any application (Spotify, Tidal App, Browser) directly through the low-latency V8 processing pipeline.</p>
+                    <button 
+                      onClick={async () => {
+                        const ae = await getOrCreateEngine();
+                        if (!ae) return;
+                        if (streamActive) { setStreamActive(false); return; }
+                        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true }).catch(() => null);
+                        if (stream) { ae.connectStream(stream); setStreamActive(true); }
+                      }}
+                      className={`w-full py-3 font-bold uppercase tracking-widest text-[10px] transition-all border ${streamActive ? 'bg-orange-500/10 text-orange-500 border-orange-500/50' : 'bg-white text-black border-white hover:bg-neutral-200'}`}
+                    >
+                      {streamActive ? 'Release Node' : 'Initialize Capture'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-12 p-4 bg-white/5 border border-white/5 w-full flex justify-between items-center">
+                   <div className="flex gap-4">
+                      <div className="flex flex-col">
+                        <span className="text-[6px] text-zinc-500 font-mono">BRIDGE_STATUS</span>
+                        <span className={`text-[8px] font-mono tracking-widest ${tidalService.current?.isAuthenticated() ? 'text-green-500' : 'text-amber-500'}`}>
+                          {tidalService.current?.isAuthenticated() ? 'OK_1000' : 'AWAIT_AUTH_1005'}
+                        </span>
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-[6px] text-zinc-500 font-mono">LATENCY_CORE</span>
+                        <span className="text-[8px] font-mono tracking-widest text-cyan-400">4.2MS</span>
+                      </div>
+                   </div>
+                   <div className="text-right">
+                      <span className="text-[6px] text-zinc-500 font-mono block">NODE_IDENTIFIER</span>
+                      <span className="text-[8px] font-mono text-zinc-400 uppercase">{Math.random().toString(16).slice(2, 10)}</span>
+                   </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        <footer className="h-16 border-t border-white/5 bg-[#080808] px-4 md:px-6 flex items-center justify-between z-20">
+          <div className="w-1/3 md:w-56 flex items-center gap-2 md:gap-3">
+            <div className="w-7 h-7 md:w-9 md:h-9 border border-white/10 bg-neutral-900 rounded-sm flex items-center justify-center shrink-0">
+              <Disc className={`${isPlaying ? 'animate-spin-slow text-white' : 'text-neutral-700'}`} size={isPlaying ? 14 : 16} />
+            </div>
+            <div className="overflow-hidden">
+              <h4 className="text-[9px] md:text-[10px] font-serif text-white truncate italic">{currentTrack?.trackName || "Awaiting Input"}</h4>
+              <p className="text-[7px] md:text-[8px] font-mono text-neutral-500 truncate uppercase mt-0.5 tracking-wider">{currentTrack?.artistName || "System Idle"}</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 md:gap-6 justify-center">
+            <button className="text-neutral-600 hover:text-white transition-colors"><SkipBack size={16} fill="currentColor" /></button>
+            <Tooltip text={t('tt.play', language)} position="top">
+              <button onClick={togglePlay} className="w-10 h-8 md:w-12 md:h-9 border border-white/20 bg-white/5 text-white flex items-center justify-center rounded-sm hover:bg-white hover:text-black transition-all">
+                {isPlaying ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" className="ml-0.5" />}
+              </button>
+            </Tooltip>
+            <button className="text-neutral-600 hover:text-white transition-colors"><SkipForward size={16} fill="currentColor" /></button>
+          </div>
+
+          <div className="w-1/3 md:w-56 flex items-center justify-end gap-2 md:gap-4">
+            <Volume2 size={10} className="text-neutral-600 hidden sm:block" />
+            <Tooltip text={t('tt.gain', language)} position="top">
+              <div className="w-14 md:w-24 h-[1px] bg-neutral-800 relative group cursor-pointer inline-block">
+                <div className="h-full bg-orange-500" style={{ width: `${masterGain * 50}%` }} />
+                <input type="range" min="0" max="2" step="0.01" value={masterGain} onChange={(e) => { const v = parseFloat(e.target.value); setMasterGain(v); engine?.setMasterGain(v); }} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+              </div>
+            </Tooltip>
+            <span className="text-[7px] md:text-[8px] font-mono text-neutral-600">{(masterGain*50).toFixed(0)}%</span>
+          </div>
+        </footer>
+
+        <footer className="h-8 border-t border-white/5 flex items-center px-8 justify-between bg-[#080808] opacity-30 text-[8px] uppercase tracking-[0.2em] font-mono">
+          <span>Protocol: OMEGA_V8_SECURE</span>
+          <span>IVANNURI DSP Framework © 2026</span>
+          <span className="text-orange-500">Node Linked</span>
+        </footer>
+      </main>
+
+      <audio ref={audioRef} onEnded={() => setIsPlaying(false)} className="hidden" crossOrigin="anonymous" />
+
+      <AnimatePresence>
+        {isSettingsOpen && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 z-[100] bg-black/95 backdrop-blur-md flex items-center justify-center p-4">
+            <motion.div initial={{ scale: 0.98, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-[#0C0C0C] border border-white/10 p-10 rounded-sm w-full max-w-xl shadow-2xl relative">
+              <button onClick={() => setIsSettingsOpen(false)} className="absolute top-6 right-6 text-neutral-600 hover:text-white transition-colors">✕</button>
+              <h2 className="text-2xl font-serif italic text-white mb-10 flex items-center gap-3">System Configuration</h2>
+              <div className="space-y-10">
+                <div className="grid grid-cols-2 gap-10">
+                  <div className="space-y-3">
+                    <label className="text-[9px] font-mono text-neutral-500 uppercase tracking-widest">{t('settings.language', language)}</label>
+                    <select value={language} onChange={(e) => setLanguage(e.target.value)} className="w-full bg-neutral-900 border border-white/10 p-3 rounded-sm text-xs focus:border-white/30 outline-none text-[#E0E0E0]">
+                      <option value="es">Español</option><option value="en">English</option><option value="fr">Français</option>
+                    </select>
+                  </div>
+                  <div className="space-y-3">
+                    <label className="text-[9px] font-mono text-neutral-500 uppercase tracking-widest">{t('bt.device', language)}</label>
+                    <select value={selectedOutputId} onChange={(e) => handleOutputChange(e.target.value)} className="w-full bg-neutral-900 border border-white/10 p-3 rounded-sm text-xs focus:border-white/30 outline-none text-[#E0E0E0]">
+                       <option value="">Default Link</option>
+                       {outputDevices.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || "Speaker"}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div className="pt-8 border-t border-white/5">
+                  <label className="text-[9px] font-mono text-orange-500 font-bold uppercase tracking-widest mb-6 block">DSP Pipeline Modules</label>
+                  <div className="grid gap-4">
+                    {[
+                      ['quantumReverb', 'settings.dsp.hrtf'],
+                      ['neuralHarmonics', 'settings.dsp.neural'],
+                    ].map(([key, label]: any) => (
+                      <label key={key} className="flex items-center justify-between p-4 bg-[#141414] border border-white/5 rounded-sm hover:border-white/20 cursor-pointer transition-all group">
+                        <span className="text-xs text-neutral-400 group-hover:text-white transition-colors">{t(label, language)}</span>
+                        <input type="checkbox" onChange={(e) => engine?.setFeatureToggle(key, e.target.checked)} className="accent-orange-500 h-4 w-4" />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <button onClick={() => setIsSettingsOpen(false)} className="w-full mt-12 py-4 bg-orange-500 text-black font-bold uppercase tracking-[0.3em] text-xs hover:bg-orange-400 transition-colors">Commit to Runtime</button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
