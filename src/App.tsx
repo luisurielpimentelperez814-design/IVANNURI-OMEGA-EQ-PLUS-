@@ -13,6 +13,11 @@ import { GridDisplay } from "./components/GridDisplay";
 import { ObjectExplorer } from "./components/ObjectExplorer";
 import { TidalService, TidalTrack } from "./services/tidalService";
 
+
+// ── Debug Build Flag ────────────────────────────────────────────────────────
+const IS_DEBUG_BUILD = import.meta.env.VITE_DEBUG_BUILD === 'true';
+const BUILD_VARIANT = import.meta.env.VITE_BUILD_MODE ?? 'development';
+
 const PRESETS: Record<string, any> = {
   "PURE BYPASS": { bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], drive: 1.0, warmth: 1.0 },
   "ROCK ELITE": { bands: [4, 5, 3, 1, -2, -1, 2, 4, 3, 2], drive: 1.8, warmth: 1.3 },
@@ -431,8 +436,17 @@ export default function App() {
               <div className="w-3 h-3 border-2 border-[#0A0A0A]"></div>
             </div>
             <div>
-              <h1 className="text-lg font-serif tracking-tight text-white leading-none">IVANNURI</h1>
-              <span className="text-[8px] font-sans italic opacity-40 uppercase tracking-tighter">Omega Processor</span>
+              <h1 className="text-lg font-serif tracking-tight text-white leading-none">
+                  IVANNURI
+                  {IS_DEBUG_BUILD && (
+                    <span style={{fontSize:8, marginLeft:6, background:'rgba(120,0,255,0.3)', border:'1px solid rgba(160,80,255,0.5)', borderRadius:3, padding:'1px 5px', color:'#c080ff', verticalAlign:'middle', fontFamily:'monospace', letterSpacing:'0.1em'}}>
+                      DEBUG
+                    </span>
+                  )}
+                </h1>
+              <span className="text-[8px] font-sans italic opacity-40 uppercase tracking-tighter">
+                {IS_DEBUG_BUILD ? `Debug · ${BUILD_VARIANT}` : 'Omega Processor'}
+              </span>
             </div>
           </div>
           <nav className="space-y-6">
@@ -1087,9 +1101,28 @@ export default function App() {
         <footer className="h-8 border-t border-white/5 flex items-center px-8 justify-between bg-[#080808] opacity-30 text-[8px] uppercase tracking-[0.2em] font-mono">
           <span>Protocol: OMEGA_V8_SECURE</span>
           <span>IVANNURI DSP Framework © 2026</span>
-          <span className="text-orange-500">Node Linked</span>
+          {IS_DEBUG_BUILD ? (
+              <span className="text-purple-400 animate-pulse font-bold">⚠ DEBUG BUILD</span>
+            ) : (
+              <span className="text-orange-500">Node Linked</span>
+            )}
         </footer>
       </main>
+
+
+      {/* ── DEBUG RIBBON ── */}
+      {IS_DEBUG_BUILD && (
+        <div style={{
+          position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 9999,
+          background: 'repeating-linear-gradient(45deg, rgba(120,0,255,0.9) 0, rgba(120,0,255,0.9) 10px, rgba(80,0,200,0.9) 10px, rgba(80,0,200,0.9) 20px)',
+          color: '#e0c0ff', fontSize: 9, fontFamily: 'monospace', textAlign: 'center',
+          padding: '3px 0', letterSpacing: '0.18em', pointerEvents: 'none',
+          borderTop: '1px solid rgba(180,100,255,0.5)',
+          textShadow: '0 0 8px rgba(200,100,255,0.8)'
+        }}>
+          ⚠ DEBUG BUILD · IVANNURI OMEGA EQ · NO DISTRIBUIR · SOLO DESARROLLO ⚠
+        </div>
+      )}
 
       <audio ref={audioRef} onEnded={() => setIsPlaying(false)} className="hidden" crossOrigin="anonymous" />
 
